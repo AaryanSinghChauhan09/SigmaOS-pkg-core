@@ -1,0 +1,12 @@
+[package]
+name = "sigmaos-pkg-core"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "SigmaOS component: pkg-core"
+
+[dependencies]
+
+[[bin]]
+name = "sigmaos-pkg-core"
+path = "src/main.rs"
