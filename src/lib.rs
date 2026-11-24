@@ -53,6 +53,90 @@ impl Package {
     }
 }
 
+/// A parsed version triple (major.minor.patch; missing parts = 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct Version {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+}
+
+impl Version {
+    /// Parse "1", "1.2", or "1.2.3" (extra suffixes ignored).
+    pub fn parse(s: &str) -> Option<Self> {
+        let core = s.split(['-', '+']).next()?;
+        let mut it = core.split('.');
+        let major = it.next()?.parse().ok()?;
+        let minor = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        let patch = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
+        Some(Self { major, minor, patch })
+    }
+}
+
+/// A version constraint on a dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Constraint {
+    Exact(Version),
+    Gte(Version),
+    Lt(Version),
+    Caret(Version),
+    Tilde(Version),
+}
+
+impl Constraint {
+    /// Does `v` satisfy this constraint?
+    pub fn matches(&self, v: &Version) -> bool {
+        match self {
+            Constraint::Exact(e) => v == e,
+            Constraint::Gte(e) => v >= e,
+            Constraint::Lt(e) => v < e,
+            Constraint::Caret(e) => {
+                // same major, >= base (semver caret)
+                v.major == e.major && v >= e
+            }
+            Constraint::Tilde(e) => {
+                // same major.minor, >= base
+                v.major == e.major && v.minor == e.minor && v >= e
+            }
+        }
+    }
+}
+
+/// Split a depends entry into (name, optional constraint).
+/// Accepts "name", "name>=1.2", "name >= 1.2", "name = 1.2.3".
+pub fn parse_dep(dep: &str) -> (String, Option<Constraint>) {
+    // find first constraint operator
+    for op in [">=", "<=", "=<", "<", "=", "^", "~"] {
+        if let Some(idx) = dep.find(op) {
+            let name = dep[..idx].trim().to_string();
+            let cstr = dep[idx..].trim();
+            // strip leading op chars for parse
+            let ver = cstr.trim_start_matches(['>', '<', '=', '^', '~']).trim();
+            let c = match op {
+                ">=" => Version::parse(ver).map(Constraint::Gte),
+                "<=" | "=<" => Version::parse(ver).map(|v| {
+                    Constraint::Lt(Version { patch: v.patch + 1, ..v })
+                }),
+                "<" => Version::parse(ver).map(Constraint::Lt),
+                "=" => Version::parse(ver).map(Constraint::Exact),
+                "^" => Version::parse(ver).map(Constraint::Caret),
+                "~" => Version::parse(ver).map(Constraint::Tilde),
+                _ => None,
+            };
+            return (name, c);
+        }
+    }
+    (dep.trim().to_string(), None)
+}
+
+/// Check an installed version against an optional constraint.
+pub fn version_ok(installed: &str, constraint: &Option<Constraint>) -> bool {
+    match constraint {
+        None => true,
+        Some(c) => Version::parse(installed).map(|v| c.matches(&v)).unwrap_or(false),
+    }
+}
+
 /// The package database.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct PackageDb {
@@ -101,7 +185,11 @@ impl PackageDb {
         // Ensure nothing installed depends on it.
         for (n, v) in &self.installed {
             if let Some(pkg) = self.packages.get(n) {
-                if pkg.depends.iter().any(|d| d == name) {
+                if pkg
+                    .depends
+                    .iter()
+                    .any(|d| parse_dep(d).0 == *name)
+                {
                     return Err(PkgError::Conflict(format!(
                         "{n} {v} depends on {name}"
                     )));
@@ -141,11 +229,28 @@ impl PackageDb {
             .get(name)
             .ok_or_else(|| PkgError::NotFound(name.into()))?;
         for dep in &pkg.depends {
-            // Skip already-installed deps.
-            if self.installed.contains_key(dep) {
-                continue;
+            let (dep_name, constraint) = parse_dep(dep);
+            // Skip already-installed deps that satisfy the constraint.
+            if let Some(installed_v) = self.installed.get(&dep_name) {
+                if version_ok(installed_v, &constraint) {
+                    continue;
+                }
+                return Err(PkgError::Conflict(format!(
+                    "{name} requires {dep} but installed {installed_v} does not satisfy constraint"
+                )));
             }
-            self.visit(dep, visited, stack, order)?;
+            // Verify the candidate package version satisfies the constraint.
+            if let (Some(c), Some(pkg_rec)) = (&constraint, self.packages.get(&dep_name)) {
+                if let Some(v) = Version::parse(&pkg_rec.version) {
+                    if !c.matches(&v) {
+                        return Err(PkgError::Validation(format!(
+                            "{name} requires {dep} but available {} does not satisfy",
+                            pkg_rec.version
+                        )));
+                    }
+                }
+            }
+            self.visit(&dep_name, visited, stack, order)?;
         }
         stack.remove(name);
         visited.insert(name.to_string());
@@ -209,4 +314,87 @@ pub fn topo_order(db: &PackageDb, roots: &[String]) -> Result<Vec<String>, PkgEr
         order.push(n);
     }
     Ok(order)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pkg(name: &str, version: &str, depends: &[&str]) -> Package {
+        Package {
+            name: name.into(),
+            version: version.into(),
+            arch: "x86_64".into(),
+            description: String::new(),
+            depends: depends.iter().map(|s| s.to_string()).collect(),
+            provides: vec![],
+            conflicts: vec![],
+            installed: false,
+        }
+    }
+
+    #[test]
+    fn parse_dep_plain() {
+        let (n, c) = parse_dep("glibc");
+        assert_eq!(n, "glibc");
+        assert!(c.is_none());
+    }
+
+    #[test]
+    fn parse_dep_constraints() {
+        assert_eq!(parse_dep("foo>=1.2").0, "foo");
+        assert!(matches!(parse_dep("foo>=1.2").1, Some(Constraint::Gte(_))));
+        assert!(matches!(parse_dep("foo = 2.0.1").1, Some(Constraint::Exact(_))));
+        assert!(matches!(parse_dep("foo^1.0").1, Some(Constraint::Caret(_))));
+        assert!(matches!(parse_dep("foo~1.2").1, Some(Constraint::Tilde(_))));
+        assert!(matches!(parse_dep("foo<3.0").1, Some(Constraint::Lt(_))));
+    }
+
+    #[test]
+    fn version_matches() {
+        let v = Version::parse("1.2.3").unwrap();
+        assert!(Constraint::Gte(Version::parse("1.0").unwrap()).matches(&v));
+        assert!(Constraint::Caret(Version::parse("1.2").unwrap()).matches(&v));
+        assert!(!Constraint::Caret(Version::parse("2.0").unwrap()).matches(&v));
+        assert!(Constraint::Tilde(Version::parse("1.2.0").unwrap()).matches(&v));
+        assert!(!Constraint::Tilde(Version::parse("1.3.0").unwrap()).matches(&v));
+        assert!(Constraint::Exact(Version::parse("1.2.3").unwrap()).matches(&v));
+        assert!(!Constraint::Lt(Version::parse("1.0").unwrap()).matches(&v));
+    }
+
+    #[test]
+    fn resolve_honors_constraints() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["lib>=2.0"])).unwrap();
+        db.add(pkg("lib", "2.5", &[])).unwrap();
+        let order = db.resolve("app").unwrap();
+        assert_eq!(order, vec!["lib", "app"]);
+    }
+
+    #[test]
+    fn resolve_rejects_unsatisfied() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["lib>=3.0"])).unwrap();
+        db.add(pkg("lib", "2.5", &[])).unwrap();
+        assert!(matches!(db.resolve("app"), Err(PkgError::Validation(_))));
+    }
+
+    #[test]
+    fn installed_version_checked() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["lib>=2.0"])).unwrap();
+        db.add(pkg("lib", "1.5", &[])).unwrap();
+        db.installed.insert("lib".into(), "1.5".into());
+        assert!(matches!(db.resolve("app"), Err(PkgError::Conflict(_))));
+    }
+
+    #[test]
+    fn remove_checks_constrained_deps() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["lib>=1.0"])).unwrap();
+        db.add(pkg("lib", "1.5", &[])).unwrap();
+        db.installed.insert("app".into(), "1.0".into());
+        db.installed.insert("lib".into(), "1.5".into());
+        assert!(db.remove("lib").is_err());
+    }
 }
