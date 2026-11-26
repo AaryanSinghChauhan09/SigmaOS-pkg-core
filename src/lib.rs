@@ -266,6 +266,23 @@ impl PackageDb {
         Ok(())
     }
 
+    /// Installed packages that nothing else installed depends on —
+    /// pacman's `-Qtd` "orphan" query. Explicitly-installed leaves are
+    /// indistinguishable here, so treat the result as "review candidates".
+    pub fn orphans(&self) -> Vec<String> {
+        let needed: BTreeSet<String> = self
+            .installed
+            .keys()
+            .filter_map(|n| self.packages.get(n))
+            .flat_map(|p| p.depends.iter().map(|d| parse_dep(d).0))
+            .collect();
+        self.installed
+            .keys()
+            .filter(|n| !needed.contains(*n))
+            .cloned()
+            .collect()
+    }
+
     /// List installed packages.
     pub fn list_installed(&self) -> Vec<(&String, &String)> {
         self.installed.iter().collect()
@@ -397,6 +414,20 @@ mod tests {
         db.add(pkg("lib", "1.5", &[])).unwrap();
         db.installed.insert("lib".into(), "1.5".into());
         assert!(matches!(db.resolve("app"), Err(PkgError::Conflict(_))));
+    }
+
+    #[test]
+    fn orphans_lists_unneeded() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["lib"])).unwrap();
+        db.add(pkg("lib", "1.0", &[])).unwrap();
+        db.add(pkg("lone", "1.0", &[])).unwrap();
+        db.installed.insert("app".into(), "1.0".into());
+        db.installed.insert("lib".into(), "1.0".into());
+        db.installed.insert("lone".into(), "1.0".into());
+        // 'app' is a leaf too (nothing depends on it) — orphans are
+        // packages with no *dependents*, matching pacman -Qtd.
+        assert_eq!(db.orphans(), vec!["app".to_string(), "lone".to_string()]);
     }
 
     #[test]

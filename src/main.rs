@@ -28,6 +28,8 @@ enum Commands {
     Install { name: String, version: String },
     /// Remove an installed package.
     Remove { name: String },
+    /// List installed packages nothing depends on (pacman -Qtd).
+    Orphans,
     /// Print database path.
     Path,
 }
@@ -85,6 +87,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             db.remove(&name)?;
             save_db(&db, &cli.db)?;
             println!("removed {name}");
+        }
+        Commands::Orphans => {
+            for n in db.orphans() {
+                println!("{n}");
+            }
         }
         Commands::Path => {
             println!(
