@@ -48,8 +48,13 @@ impl Package {
     /// Validate package name (alnum, -, _, .; must start alnum).
     pub fn valid_name(name: &str) -> bool {
         !name.is_empty()
-            && name.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+'))
+            && name
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric())
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+'))
     }
 }
 
@@ -69,7 +74,11 @@ impl Version {
         let major = it.next()?.parse().ok()?;
         let minor = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
         let patch = it.next().and_then(|v| v.parse().ok()).unwrap_or(0);
-        Some(Self { major, minor, patch })
+        Some(Self {
+            major,
+            minor,
+            patch,
+        })
     }
 }
 
@@ -115,7 +124,10 @@ pub fn parse_dep(dep: &str) -> (String, Option<Constraint>) {
             let c = match op {
                 ">=" => Version::parse(ver).map(Constraint::Gte),
                 "<=" | "=<" => Version::parse(ver).map(|v| {
-                    Constraint::Lt(Version { patch: v.patch + 1, ..v })
+                    Constraint::Lt(Version {
+                        patch: v.patch + 1,
+                        ..v
+                    })
                 }),
                 "<" => Version::parse(ver).map(Constraint::Lt),
                 "=" => Version::parse(ver).map(Constraint::Exact),
@@ -133,7 +145,9 @@ pub fn parse_dep(dep: &str) -> (String, Option<Constraint>) {
 pub fn version_ok(installed: &str, constraint: &Option<Constraint>) -> bool {
     match constraint {
         None => true,
-        Some(c) => Version::parse(installed).map(|v| c.matches(&v)).unwrap_or(false),
+        Some(c) => Version::parse(installed)
+            .map(|v| c.matches(&v))
+            .unwrap_or(false),
     }
 }
 
@@ -185,14 +199,8 @@ impl PackageDb {
         // Ensure nothing installed depends on it.
         for (n, v) in &self.installed {
             if let Some(pkg) = self.packages.get(n) {
-                if pkg
-                    .depends
-                    .iter()
-                    .any(|d| parse_dep(d).0 == *name)
-                {
-                    return Err(PkgError::Conflict(format!(
-                        "{n} {v} depends on {name}"
-                    )));
+                if pkg.depends.iter().any(|d| parse_dep(d).0 == *name) {
+                    return Err(PkgError::Conflict(format!("{n} {v} depends on {name}")));
                 }
             }
         }
@@ -344,7 +352,10 @@ mod tests {
     fn parse_dep_constraints() {
         assert_eq!(parse_dep("foo>=1.2").0, "foo");
         assert!(matches!(parse_dep("foo>=1.2").1, Some(Constraint::Gte(_))));
-        assert!(matches!(parse_dep("foo = 2.0.1").1, Some(Constraint::Exact(_))));
+        assert!(matches!(
+            parse_dep("foo = 2.0.1").1,
+            Some(Constraint::Exact(_))
+        ));
         assert!(matches!(parse_dep("foo^1.0").1, Some(Constraint::Caret(_))));
         assert!(matches!(parse_dep("foo~1.2").1, Some(Constraint::Tilde(_))));
         assert!(matches!(parse_dep("foo<3.0").1, Some(Constraint::Lt(_))));

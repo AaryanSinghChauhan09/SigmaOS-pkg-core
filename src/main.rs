@@ -87,8 +87,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("removed {name}");
         }
         Commands::Path => {
-            println!("{}", cli.db.clone().or_else(default_db_path)
-                .map(|p| p.display().to_string()).unwrap_or_default());
+            println!(
+                "{}",
+                cli.db
+                    .clone()
+                    .or_else(default_db_path)
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default()
+            );
         }
     }
     Ok(())
