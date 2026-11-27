@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Errors produced by this component.
@@ -321,22 +321,35 @@ pub fn default_db_path() -> Option<PathBuf> {
         .map(|p| p.data_dir().join("pkg").join("db.json"))
 }
 
-/// BFS topological ordering helper used by installers.
+/// Dependency-first install order: every package appears after all of
+/// its dependencies. Detects cycles via a visiting-state map.
 pub fn topo_order(db: &PackageDb, roots: &[String]) -> Result<Vec<String>, PkgError> {
-    let mut order = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut queue: VecDeque<String> = roots.iter().cloned().collect();
-    while let Some(n) = queue.pop_front() {
-        if !seen.insert(n.clone()) {
-            continue;
+    fn visit(
+        db: &PackageDb,
+        n: &str,
+        state: &mut BTreeMap<String, u8>,
+        order: &mut Vec<String>,
+    ) -> Result<(), PkgError> {
+        match state.get(n).copied().unwrap_or(0) {
+            1 => return Err(PkgError::Cycle(n.into())),
+            2 => return Ok(()),
+            _ => {}
         }
-        let deps = db.resolve(&n)?;
-        for d in deps {
-            if !seen.contains(&d) {
-                queue.push_back(d);
+        state.insert(n.to_string(), 1);
+        for d in db.resolve(n)? {
+            // resolve() includes the queried package itself.
+            if d != n {
+                visit(db, &d, state, order)?;
             }
         }
-        order.push(n);
+        state.insert(n.to_string(), 2);
+        order.push(n.to_string());
+        Ok(())
+    }
+    let mut order = Vec::new();
+    let mut state = BTreeMap::new();
+    for r in roots {
+        visit(db, r, &mut state, &mut order)?;
     }
     Ok(order)
 }
@@ -438,5 +451,56 @@ mod tests {
         db.installed.insert("app".into(), "1.0".into());
         db.installed.insert("lib".into(), "1.5".into());
         assert!(db.remove("lib").is_err());
+    }
+
+    #[test]
+    fn topo_order_dependencies_first() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["lib", "tool"])).unwrap();
+        db.add(pkg("lib", "2.0", &[])).unwrap();
+        db.add(pkg("tool", "1.0", &["lib"])).unwrap();
+        let order = topo_order(&db, &["app".into()]).unwrap();
+        let pos = |n: &str| order.iter().position(|x| x == n).unwrap();
+        assert!(pos("lib") < pos("app"));
+        assert!(pos("tool") < pos("app"));
+    }
+
+    #[test]
+    fn save_load_roundtrip() {
+        let mut db = PackageDb::new();
+        db.add(pkg("a", "1.0", &[])).unwrap();
+        db.install("a", "1.0").unwrap();
+        let dir = std::env::temp_dir().join(format!("pkgdb-{}", std::process::id()));
+        let path = dir.join("db.toml");
+        db.save(&path).unwrap();
+        let back = PackageDb::load(&path).unwrap();
+        assert_eq!(back.list_installed().len(), 1);
+        assert_eq!(back.list_installed()[0].0, "a");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_rejects_duplicate_and_bad_name() {
+        let mut db = PackageDb::new();
+        db.add(pkg("x", "1.0", &[])).unwrap();
+        // Index semantics: re-adding a name replaces the record.
+        db.add(pkg("x", "2.0", &[])).unwrap();
+        assert_eq!(db.packages["x"].version, "2.0");
+        let mut bad = pkg("bad name!", "1.0", &[]);
+        assert!(db.add(bad.clone()).is_err());
+        bad.name = "good-name_1.2".into();
+        assert!(Package::valid_name(&bad.name));
+    }
+
+    #[test]
+    fn search_matches_name_and_desc() {
+        let mut db = PackageDb::new();
+        let mut p = pkg("findme", "1.0", &[]);
+        p.description = "a searchable thing".into();
+        db.add(p).unwrap();
+        db.add(pkg("other", "1.0", &[])).unwrap();
+        assert_eq!(db.search("findme").len(), 1);
+        assert_eq!(db.search("searchable").len(), 1);
+        assert!(db.search("zzz").is_empty());
     }
 }
