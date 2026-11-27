@@ -169,7 +169,9 @@ impl PackageDb {
 
     /// Add or update a package record.
     pub fn add(&mut self, pkg: Package) -> Result<(), PkgError> {
+        log::info!("Adding package record: {} ({})", pkg.name, pkg.version);
         if !Package::valid_name(&pkg.name) {
+            log::error!("Invalid package name rejected: {}", pkg.name);
             return Err(PkgError::InvalidName(pkg.name.clone()));
         }
         self.packages.insert(pkg.name.clone(), pkg);
@@ -178,40 +180,48 @@ impl PackageDb {
 
     /// Mark a package installed.
     pub fn install(&mut self, name: &str, version: &str) -> Result<(), PkgError> {
-        let pkg = self
-            .packages
-            .get(name)
-            .ok_or_else(|| PkgError::NotFound(name.into()))?;
+        log::info!("Installing package: {} {}", name, version);
+        let pkg = self.packages.get(name).ok_or_else(|| {
+            log::error!("Package not found for install: {}", name);
+            PkgError::NotFound(name.into())
+        })?;
         // Check conflicts.
         for c in &pkg.conflicts {
             if self.installed.contains_key(c) {
+                log::error!("Install conflict: {} conflicts with installed {}", name, c);
                 return Err(PkgError::Conflict(format!(
                     "{name} conflicts with installed {c}"
                 )));
             }
         }
         self.installed.insert(name.to_string(), version.to_string());
+        log::info!("Installed package: {} {}", name, version);
         Ok(())
     }
 
     /// Mark a package removed.
     pub fn remove(&mut self, name: &str) -> Result<(), PkgError> {
+        log::info!("Removing package: {}", name);
         // Ensure nothing installed depends on it.
         for (n, v) in &self.installed {
             if let Some(pkg) = self.packages.get(n) {
                 if pkg.depends.iter().any(|d| parse_dep(d).0 == *name) {
+                    log::error!("Cannot remove {}: {} {} depends on it", name, n, v);
                     return Err(PkgError::Conflict(format!("{n} {v} depends on {name}")));
                 }
             }
         }
         if self.installed.remove(name).is_none() {
+            log::error!("Package not installed, cannot remove: {}", name);
             return Err(PkgError::NotFound(name.into()));
         }
+        log::info!("Removed package: {}", name);
         Ok(())
     }
 
     /// Resolve dependencies for a package (BFS, detects cycles).
     pub fn resolve(&self, name: &str) -> Result<Vec<String>, PkgError> {
+        log::info!("Resolving dependencies for package: {}", name);
         let mut order = Vec::new();
         let mut visited = BTreeSet::new();
         let mut stack = BTreeSet::new();
@@ -298,6 +308,7 @@ impl PackageDb {
 
     /// Save database to a JSON file.
     pub fn save(&self, path: &Path) -> Result<(), PkgError> {
+        log::info!("Saving package database to {}", path.display());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -309,9 +320,15 @@ impl PackageDb {
 
     /// Load database from a JSON file.
     pub fn load(path: &Path) -> Result<Self, PkgError> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|_| PkgError::NotFound(path.display().to_string()))?;
-        Ok(serde_json::from_str(&text)?)
+        log::info!("Loading package database from {}", path.display());
+        let text = std::fs::read_to_string(path).map_err(|e| {
+            log::error!("Failed to read package database {}: {}", path.display(), e);
+            PkgError::NotFound(path.display().to_string())
+        })?;
+        serde_json::from_str(&text).map_err(|e| {
+            log::error!("Failed to parse package database {}: {}", path.display(), e);
+            PkgError::Json(e)
+        })
     }
 }
 
