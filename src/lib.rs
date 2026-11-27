@@ -246,6 +246,14 @@ impl PackageDb {
             .packages
             .get(name)
             .ok_or_else(|| PkgError::NotFound(name.into()))?;
+        for conflict in &pkg.conflicts {
+            let conflict_name = parse_dep(conflict).0;
+            if self.installed.contains_key(&conflict_name) {
+                return Err(PkgError::Conflict(format!(
+                    "{name} conflicts with installed package {conflict_name}"
+                )));
+            }
+        }
         for dep in &pkg.depends {
             let (dep_name, constraint) = parse_dep(dep);
             // Skip already-installed deps that satisfy the constraint.
@@ -519,5 +527,54 @@ mod tests {
         assert_eq!(db.search("findme").len(), 1);
         assert_eq!(db.search("searchable").len(), 1);
         assert!(db.search("zzz").is_empty());
+    }
+
+    // Arrange: two packages forming a dependency cycle a -> b -> a
+    // Act: resolve("a")
+    // Assert: returns PkgError::Cycle
+    #[test]
+    fn test_circular_dependency_detected_aaa() {
+        let mut db = PackageDb::new();
+        db.add(pkg("a", "1.0", &["b"])).unwrap();
+        db.add(pkg("b", "1.0", &["a"])).unwrap();
+        assert!(matches!(db.resolve("a"), Err(PkgError::Cycle(_))));
+    }
+
+    // Arrange: package depending on an unknown package
+    // Act: resolve("app")
+    // Assert: returns PkgError::NotFound
+    #[test]
+    fn test_missing_dependency_returns_not_found_aaa() {
+        let mut db = PackageDb::new();
+        db.add(pkg("app", "1.0", &["missing-dep"])).unwrap();
+        assert!(matches!(db.resolve("app"), Err(PkgError::NotFound(_))));
+    }
+
+    // Arrange: two packages where "b" conflicts with installed "a"
+    // Act: resolve("b")
+    // Assert: returns PkgError::Conflict
+    #[test]
+    fn test_conflict_with_installed_package_rejected_aaa() {
+        let mut db = PackageDb::new();
+        db.add(pkg("a", "1.0", &[])).unwrap();
+        let mut b = pkg("b", "1.0", &[]);
+        b.conflicts = vec!["a".into()];
+        db.add(b).unwrap();
+        db.install("a", "1.0").unwrap();
+        assert!(matches!(db.resolve("b"), Err(PkgError::Conflict(_))));
+    }
+
+    // Arrange: package "lib" installed and depended on by "app"
+    // Act: topo_order with multiple roots ["app", "extra"]
+    // Assert: "lib" appears only once before "app", and "extra" is included
+    #[test]
+    fn test_topo_order_deduplicates_shared_deps_aaa() {
+        let mut db = PackageDb::new();
+        db.add(pkg("lib", "1.0", &[])).unwrap();
+        db.add(pkg("app", "1.0", &["lib"])).unwrap();
+        db.add(pkg("extra", "1.0", &["lib"])).unwrap();
+        let order = topo_order(&db, &["app".into(), "extra".into()]).unwrap();
+        assert_eq!(order.iter().filter(|x| x.as_str() == "lib").count(), 1);
+        assert_eq!(order.len(), 3);
     }
 }
