@@ -277,7 +277,7 @@ impl PackageDb {
     }
 
     /// Installed packages that nothing else installed depends on —
-    /// pacman's `-Qtd` "orphan" query. Explicitly-installed leaves are
+    /// orphan query. Explicitly-installed leaves are
     /// indistinguishable here, so treat the result as "review candidates".
     pub fn orphans(&self) -> Vec<String> {
         let needed: BTreeSet<String> = self
@@ -456,7 +456,7 @@ mod tests {
         db.installed.insert("lib".into(), "1.0".into());
         db.installed.insert("lone".into(), "1.0".into());
         // 'app' is a leaf too (nothing depends on it) — orphans are
-        // packages with no *dependents*, matching pacman -Qtd.
+        // packages with no *dependents* (orphan leaves).
         assert_eq!(db.orphans(), vec!["app".to_string(), "lone".to_string()]);
     }
 

@@ -28,7 +28,7 @@ enum Commands {
     Install { name: String, version: String },
     /// Remove an installed package.
     Remove { name: String },
-    /// List installed packages nothing depends on (pacman -Qtd).
+    /// List installed packages nothing depends on (orphan query).
     Orphans,
     /// Print database path.
     Path,
