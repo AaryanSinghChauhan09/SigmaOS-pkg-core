@@ -324,8 +324,8 @@ impl PackageDb {
                 // meets the constraint, or provides dep_name and meets it.
                 let ok = self.installed.iter().any(|(inm, iver)| {
                     let record = self.packages.get(inm);
-                    let offers = *inm == dep_name
-                        || record.is_some_and(|p| p.provides.iter().any(|x| *x == dep_name));
+                    let offers =
+                        *inm == dep_name || record.is_some_and(|p| p.provides.contains(&dep_name));
                     offers && version_ok(iver, &constraint)
                 });
                 if !ok {
