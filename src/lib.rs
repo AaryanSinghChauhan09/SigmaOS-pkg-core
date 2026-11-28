@@ -195,6 +195,9 @@ impl PackageDb {
             }
         }
         self.installed.insert(name.to_string(), version.to_string());
+        if let Some(pkg) = self.packages.get_mut(name) {
+            pkg.installed = true;
+        }
         log::info!("Installed package: {} {}", name, version);
         Ok(())
     }
@@ -214,6 +217,9 @@ impl PackageDb {
         if self.installed.remove(name).is_none() {
             log::error!("Package not installed, cannot remove: {}", name);
             return Err(PkgError::NotFound(name.into()));
+        }
+        if let Some(pkg) = self.packages.get_mut(name) {
+            pkg.installed = false;
         }
         log::info!("Removed package: {}", name);
         Ok(())
@@ -576,5 +582,26 @@ mod tests {
         let order = topo_order(&db, &["app".into(), "extra".into()]).unwrap();
         assert_eq!(order.iter().filter(|x| x.as_str() == "lib").count(), 1);
         assert_eq!(order.len(), 3);
+    }
+
+    #[test]
+    fn install_remove_flip_installed_flag() {
+        let mut db = PackageDb::new();
+        db.add(Package {
+            name: "foo".into(),
+            version: "1.0".into(),
+            arch: "x86_64".into(),
+            description: String::new(),
+            depends: vec![],
+            provides: vec![],
+            conflicts: vec![],
+            installed: false,
+        })
+        .unwrap();
+        assert!(!db.packages["foo"].installed);
+        db.install("foo", "1.0").unwrap();
+        assert!(db.packages["foo"].installed);
+        db.remove("foo").unwrap();
+        assert!(!db.packages["foo"].installed);
     }
 }
