@@ -30,6 +30,8 @@ enum Commands {
     Remove { name: String },
     /// List installed packages nothing depends on (orphan query).
     Orphans,
+    /// Show database statistics.
+    Stats,
     /// Verify installed dependency constraints (apt-get check analogue).
     Check,
     /// List installed packages that depend on a package.
@@ -91,6 +93,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             db.remove(&name)?;
             save_db(&db, &cli.db)?;
             println!("removed {name}");
+        }
+        Commands::Stats => {
+            let (inst, total) = db.stats();
+            println!("installed: {}  records: {}", inst, total);
         }
         Commands::Orphans => {
             for n in db.orphans() {

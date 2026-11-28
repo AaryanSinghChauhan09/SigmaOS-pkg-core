@@ -350,6 +350,11 @@ impl PackageDb {
             .collect()
     }
 
+    /// Database statistics: (installed count, total records).
+    pub fn stats(&self) -> (usize, usize) {
+        (self.installed.len(), self.packages.len())
+    }
+
     /// List installed packages.
     pub fn list_installed(&self) -> Vec<(&String, &String)> {
         self.installed.iter().collect()
