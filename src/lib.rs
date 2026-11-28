@@ -307,6 +307,35 @@ impl PackageDb {
             .collect()
     }
 
+    /// `apt-get check` analogue: verify every installed package's
+    /// dependency constraints are satisfied by the installed set.
+    /// Returns human-readable violation descriptions (empty = healthy).
+    /// Virtual `provides` satisfy deps like real names do.
+    pub fn check(&self) -> Vec<String> {
+        let mut violations = Vec::new();
+        for (name, ver) in &self.installed {
+            let Some(pkg) = self.packages.get(name) else {
+                violations.push(format!("{name} {ver}: no package record"));
+                continue;
+            };
+            for dep in &pkg.depends {
+                let (dep_name, constraint) = parse_dep(dep);
+                // Satisfied if any installed package named dep_name
+                // meets the constraint, or provides dep_name and meets it.
+                let ok = self.installed.iter().any(|(inm, iver)| {
+                    let record = self.packages.get(inm);
+                    let offers = *inm == dep_name
+                        || record.is_some_and(|p| p.provides.iter().any(|x| *x == dep_name));
+                    offers && version_ok(iver, &constraint)
+                });
+                if !ok {
+                    violations.push(format!("{name} {ver}: unsatisfied dep {dep}"));
+                }
+            }
+        }
+        violations
+    }
+
     /// Reverse dependencies: installed packages whose `depends`
     /// entries name `name` (direct only — apt-cache rdepends analogue).
     pub fn rdepends(&self, name: &str) -> Vec<String> {
@@ -644,5 +673,43 @@ mod tests {
         r.sort();
         assert_eq!(r, vec!["app", "tool"]);
         assert!(db.rdepends("app").is_empty());
+    }
+
+    #[test]
+    fn check_reports_unsatisfied_deps() {
+        let mut db = PackageDb::new();
+        // lib provides "libfoo"; app depends on "libfoo>=2.0" but
+        // installed lib is 1.0 -> violation.
+        db.add(Package {
+            name: "lib".into(),
+            version: "1.0".into(),
+            arch: "x86_64".into(),
+            description: String::new(),
+            depends: vec![],
+            provides: vec!["libfoo".into()],
+            conflicts: vec![],
+            installed: false,
+        })
+        .unwrap();
+        db.add(Package {
+            name: "app".into(),
+            version: "1.0".into(),
+            arch: "x86_64".into(),
+            description: String::new(),
+            depends: vec!["libfoo>=2.0".into()],
+            provides: vec![],
+            conflicts: vec![],
+            installed: false,
+        })
+        .unwrap();
+        db.install("lib", "1.0").unwrap();
+        db.install("app", "1.0").unwrap();
+        let v = db.check();
+        assert_eq!(v.len(), 1);
+        assert!(v[0].contains("libfoo>=2.0"));
+        // satisfied case: bump installed lib? can't — version fixed.
+        // remove app -> clean
+        db.remove("app").unwrap();
+        assert!(db.check().is_empty());
     }
 }
