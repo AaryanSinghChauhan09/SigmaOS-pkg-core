@@ -731,4 +731,26 @@ mod tests {
         db.remove("app").unwrap();
         assert!(db.check().is_empty());
     }
+
+    #[test]
+    fn what_provides_and_case_insensitive_search() {
+        let mut db = PackageDb::new();
+        db.add(Package {
+            name: "mailx".into(),
+            version: "1.0".into(),
+            arch: "x86_64".into(),
+            description: "Mail user agent".into(),
+            depends: vec![],
+            provides: vec!["mail-transport".into()],
+            conflicts: vec![],
+            installed: false,
+        })
+        .unwrap();
+        assert_eq!(db.what_provides("mail-transport"), vec!["mailx"]);
+        assert_eq!(db.what_provides("mailx"), vec!["mailx"]);
+        // case-insensitive search on name and description
+        assert_eq!(db.search("MAILX").len(), 1);
+        assert_eq!(db.search("user agent").len(), 1);
+        assert!(db.search("zzz").is_empty());
+    }
 }
