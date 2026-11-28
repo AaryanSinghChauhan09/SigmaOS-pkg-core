@@ -30,6 +30,10 @@ enum Commands {
     Remove { name: String },
     /// List installed packages nothing depends on (orphan query).
     Orphans,
+    /// Verify installed dependency constraints (apt-get check analogue).
+    Check,
+    /// List installed packages that depend on a package.
+    Rdepends { name: String },
     /// Print database path.
     Path,
 }
@@ -90,6 +94,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Orphans => {
             for n in db.orphans() {
+                println!("{n}");
+            }
+        }
+        Commands::Check => {
+            let v = db.check();
+            if v.is_empty() {
+                println!("ok: all dependencies satisfied");
+            } else {
+                for line in &v {
+                    println!("{line}");
+                }
+                std::process::exit(1);
+            }
+        }
+        Commands::Rdepends { name } => {
+            for n in db.rdepends(&name) {
                 println!("{n}");
             }
         }
