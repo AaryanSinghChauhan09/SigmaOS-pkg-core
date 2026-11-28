@@ -361,6 +361,15 @@ impl PackageDb {
             .collect()
     }
 
+    /// `what_provides` restricted to installed packages — apt's
+    /// installed-only provider view.
+    pub fn what_provides_installed(&self, name: &str) -> Vec<String> {
+        self.what_provides(name)
+            .into_iter()
+            .filter(|n| self.installed.contains_key(n))
+            .collect()
+    }
+
     /// Database statistics: (installed count, total records).
     pub fn stats(&self) -> (usize, usize) {
         (self.installed.len(), self.packages.len())

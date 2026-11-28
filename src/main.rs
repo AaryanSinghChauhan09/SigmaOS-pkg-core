@@ -32,6 +32,8 @@ enum Commands {
     Orphans,
     /// List packages providing a name (apt-cache whatprovides).
     WhatProvides { name: String },
+    /// List installed packages providing a name.
+    WhatProvidesInstalled { name: String },
     /// Show database statistics.
     Stats,
     /// Verify installed dependency constraints (apt-get check analogue).
@@ -98,6 +100,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::WhatProvides { name } => {
             for n in db.what_provides(&name) {
+                println!("{n}");
+            }
+        }
+        Commands::WhatProvidesInstalled { name } => {
+            for n in db.what_provides_installed(&name) {
                 println!("{n}");
             }
         }
