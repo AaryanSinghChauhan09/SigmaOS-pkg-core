@@ -307,6 +307,20 @@ impl PackageDb {
             .collect()
     }
 
+    /// Reverse dependencies: installed packages whose `depends`
+    /// entries name `name` (direct only — apt-cache rdepends analogue).
+    pub fn rdepends(&self, name: &str) -> Vec<String> {
+        self.installed
+            .keys()
+            .filter(|n| {
+                self.packages
+                    .get(*n)
+                    .is_some_and(|p| p.depends.iter().any(|d| parse_dep(d).0 == name))
+            })
+            .cloned()
+            .collect()
+    }
+
     /// List installed packages.
     pub fn list_installed(&self) -> Vec<(&String, &String)> {
         self.installed.iter().collect()
@@ -603,5 +617,32 @@ mod tests {
         assert!(db.packages["foo"].installed);
         db.remove("foo").unwrap();
         assert!(!db.packages["foo"].installed);
+    }
+
+    #[test]
+    fn rdepends_finds_reverse_deps() {
+        let mut db = PackageDb::new();
+        for (n, deps) in [
+            ("lib", vec![]),
+            ("app", vec!["lib>=1.0"]),
+            ("tool", vec!["lib"]),
+        ] {
+            db.add(Package {
+                name: n.into(),
+                version: "1.0".into(),
+                arch: "x86_64".into(),
+                description: String::new(),
+                depends: deps.iter().map(|d| d.to_string()).collect(),
+                provides: vec![],
+                conflicts: vec![],
+                installed: false,
+            })
+            .unwrap();
+            db.install(n, "1.0").unwrap();
+        }
+        let mut r = db.rdepends("lib");
+        r.sort();
+        assert_eq!(r, vec!["app", "tool"]);
+        assert!(db.rdepends("app").is_empty());
     }
 }
