@@ -757,6 +757,10 @@ mod tests {
         .unwrap();
         assert_eq!(db.what_provides("mail-transport"), vec!["mailx"]);
         assert_eq!(db.what_provides("mailx"), vec!["mailx"]);
+        // installed-only variant is empty until mailx is installed
+        assert!(db.what_provides_installed("mail-transport").is_empty());
+        db.install("mailx", "1.0").unwrap();
+        assert_eq!(db.what_provides_installed("mail-transport"), vec!["mailx"]);
         // case-insensitive search on name and description
         assert_eq!(db.search("MAILX").len(), 1);
         assert_eq!(db.search("user agent").len(), 1);
