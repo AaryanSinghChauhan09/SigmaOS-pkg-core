@@ -30,6 +30,8 @@ enum Commands {
     Remove { name: String },
     /// List installed packages nothing depends on (orphan query).
     Orphans,
+    /// List packages providing a name (apt-cache whatprovides).
+    WhatProvides { name: String },
     /// Show database statistics.
     Stats,
     /// Verify installed dependency constraints (apt-get check analogue).
@@ -93,6 +95,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             db.remove(&name)?;
             save_db(&db, &cli.db)?;
             println!("removed {name}");
+        }
+        Commands::WhatProvides { name } => {
+            for n in db.what_provides(&name) {
+                println!("{n}");
+            }
         }
         Commands::Stats => {
             let (inst, total) = db.stats();

@@ -350,6 +350,17 @@ impl PackageDb {
             .collect()
     }
 
+    /// `apt-cache whatprovides` analogue: names of packages (installed
+    /// or in the db) that provide the virtual name `name`, including
+    /// packages whose own name matches.
+    pub fn what_provides(&self, name: &str) -> Vec<String> {
+        self.packages
+            .values()
+            .filter(|p| p.name == name || p.provides.iter().any(|x| x == name))
+            .map(|p| p.name.clone())
+            .collect()
+    }
+
     /// Database statistics: (installed count, total records).
     pub fn stats(&self) -> (usize, usize) {
         (self.installed.len(), self.packages.len())
