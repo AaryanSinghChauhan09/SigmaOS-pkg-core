@@ -362,9 +362,12 @@ impl PackageDb {
 
     /// Search packages by name substring.
     pub fn search(&self, query: &str) -> Vec<&Package> {
+        let q = query.to_lowercase();
         self.packages
             .values()
-            .filter(|p| p.name.contains(query) || p.description.contains(query))
+            .filter(|p| {
+                p.name.to_lowercase().contains(&q) || p.description.to_lowercase().contains(&q)
+            })
             .collect()
     }
 
